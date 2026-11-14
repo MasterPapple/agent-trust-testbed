@@ -1,4 +1,4 @@
-"""Model providers: mock (offline), anthropic, openai (and OpenAI-compatible endpoints)."""
+"""Model providers: mock (offline), anthropic, openai (and OpenAI-compatible endpoints), openrouter."""
 
 from __future__ import annotations
 
@@ -28,6 +28,10 @@ def build_model(spec: dict) -> Model:
         from .openai_model import OpenAIModel
 
         return OpenAIModel(label=label, **spec)
+    if provider == "openrouter":
+        from .openai_model import OpenRouterModel
+
+        return OpenRouterModel(label=label, **spec)
     raise ModelError(f"unknown provider {provider!r}")
 
 

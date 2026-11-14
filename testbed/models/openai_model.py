@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 
 from .base import ModelError, ToolCall, ToolResult, Turn
 
@@ -29,6 +31,8 @@ class OpenAIModel:
         api_key_env: str = "OPENAI_API_KEY",
         max_retries: int = 4,
         timeout: float = 600.0,
+        extra_body: dict | None = None,
+        min_interval_s: float = 0.0,
         **_: object,
     ) -> None:
         try:
@@ -48,6 +52,11 @@ class OpenAIModel:
         self.base_url = base_url
         # Some OpenAI-compatible servers only accept the older "max_tokens" name.
         self.max_tokens_param = max_tokens_param
+        # Extra JSON fields sent with every request (provider-specific options).
+        self.extra_body = dict(extra_body or {})
+        # Minimum seconds between requests for this model label, across all runs and
+        # worker threads. Useful for free tiers with strict rate limits.
+        self.min_interval_s = float(min_interval_s or 0.0)
 
     def describe(self) -> dict:
         return {
@@ -58,6 +67,9 @@ class OpenAIModel:
             "temperature": self.temperature,
             "reasoning_effort": self.reasoning_effort,
             "base_url": self.base_url,
+            "max_tokens_param": self.max_tokens_param,
+            "extra_body": self.extra_body,
+            "min_interval_s": self.min_interval_s,
             "sdk_version": self._openai.__version__,
         }
 
@@ -83,6 +95,9 @@ class OpenAISession:
             kwargs["temperature"] = m.temperature
         if m.reasoning_effort:
             kwargs["reasoning_effort"] = m.reasoning_effort
+        if m.extra_body:
+            kwargs["extra_body"] = m.extra_body
+        _throttle(m.label, m.min_interval_s)
         try:
             resp = m.client.chat.completions.create(**kwargs)
         except m._openai.APIError as exc:
@@ -102,22 +117,69 @@ class OpenAISession:
             except json.JSONDecodeError as exc:
                 args, err = None, f"invalid JSON: {exc}"
             calls.append(ToolCall(tc.id, tc.function.name, args, raw_arguments=raw, parse_error=err))
-        usage = resp.usage
+        raw = resp.model_dump(mode="json")
+        usage = raw.get("usage") or {}
         extra = {}
         refusal = getattr(msg, "refusal", None)
         if refusal:
             extra["refusal"] = refusal
+        # OpenRouter reports which upstream provider served the request.
+        if raw.get("provider"):
+            extra["upstream_provider"] = raw["provider"]
+        cost = usage.get("cost")
         return Turn(
             text=msg.content or "",
             tool_calls=calls,
             stop_reason=str(choice.finish_reason),
-            input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-            output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+            cached_input_tokens=int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0),
+            reasoning_tokens=int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0),
+            reported_cost=float(cost) if cost is not None else None,
             model_version=resp.model,
-            raw=resp.model_dump(mode="json"),
+            raw=raw,
             extra=extra,
         )
 
     def add_tool_results(self, results: list[ToolResult]) -> None:
         for r in results:
             self.messages.append({"role": "tool", "tool_call_id": r.call_id, "content": r.content})
+
+
+_last_call: dict[str, float] = {}
+_throttle_lock = threading.Lock()
+
+
+def _throttle(label: str, min_interval_s: float) -> None:
+    if min_interval_s <= 0:
+        return
+    with _throttle_lock:
+        now = time.monotonic()
+        wait = _last_call.get(label, 0.0) + min_interval_s - now
+        if wait > 0:
+            time.sleep(wait)
+        _last_call[label] = time.monotonic()
+
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+class OpenRouterModel(OpenAIModel):
+    """OpenRouter: one key, many models (including free ``:free`` variants).
+
+    Uses OpenRouter's OpenAI-compatible endpoint with ``OPENROUTER_API_KEY``.
+    Asks OpenRouter to include usage accounting, so each response reports the
+    tokens and the cost OpenRouter charged (0 for free models). The upstream
+    provider that served each request is logged, because OpenRouter may route
+    the same model id to different providers.
+    """
+
+    provider = "openrouter"
+
+    def __init__(self, label: str, model: str, **kwargs: object) -> None:
+        kwargs.setdefault("base_url", OPENROUTER_BASE_URL)
+        kwargs.setdefault("api_key_env", "OPENROUTER_API_KEY")
+        kwargs.setdefault("max_tokens_param", "max_tokens")
+        extra = dict(kwargs.pop("extra_body", None) or {})  # type: ignore[arg-type]
+        extra.setdefault("usage", {"include": True})
+        super().__init__(label=label, model=model, extra_body=extra, **kwargs)  # type: ignore[arg-type]

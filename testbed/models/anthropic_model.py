@@ -96,6 +96,8 @@ class AnthropicSession:
                 calls.append(
                     ToolCall(block.id, block.name, args, parse_error=None if args is not None else "input is not an object")
                 )
+        cache_read = int(getattr(resp.usage, "cache_read_input_tokens", 0) or 0)
+        cache_write = int(getattr(resp.usage, "cache_creation_input_tokens", 0) or 0)
         extra = {}
         stop_details = getattr(resp, "stop_details", None)
         if stop_details is not None:
@@ -104,8 +106,10 @@ class AnthropicSession:
             text="\n".join(text_parts),
             tool_calls=calls,
             stop_reason=str(resp.stop_reason),
-            input_tokens=resp.usage.input_tokens,
+            # Total input = uncached + cache reads + cache writes (the API reports them separately).
+            input_tokens=resp.usage.input_tokens + cache_read + cache_write,
             output_tokens=resp.usage.output_tokens,
+            cached_input_tokens=cache_read,
             model_version=resp.model,
             raw=resp.model_dump(mode="json"),
             extra=extra,

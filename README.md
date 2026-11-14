@@ -105,6 +105,44 @@ This writes `report.md` and `summary.csv`, with rates and 95% Wilson intervals p
 
 Any OpenAI-compatible endpoint works with `provider: openai` and a `base_url`. `configs/pilot.yaml` has commented examples for Gemini and for an open-weights model served locally with vLLM or Ollama. Some servers only accept the older `max_tokens` parameter: set `max_tokens_param: max_tokens` for those.
 
+### OpenRouter (including free models)
+
+`configs/openrouter.yaml` runs the same grid through [OpenRouter](https://openrouter.ai), with one key for many models:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+python -m testbed run configs/openrouter.yaml --limit 5
+```
+
+First replace the two `REPLACE_WITH_OPENROUTER_MODEL_ID` placeholders. On openrouter.ai/models, filter for models that are free **and** support tool calling, because the coordinator works through tool calls. A model without tool calling fails on every run, and the runner stops after 5 errors in a row. Keep these limits of free models in mind:
+
+- **Rate limits are tight.** `min_interval_s` spaces out the requests for each model (default 4 s in this config). Raise it if you see 429 errors. The SDK also retries rate-limited requests with backoff.
+- **They can change or disappear without notice.** OpenRouter can also route one model id to different upstream providers. The upstream provider is logged for every call, so you can see it.
+
+They're fine for testing the pipeline, but use pinned paid model versions for thesis results. Any OpenRouter request option can be passed through `extra_body`.
+
+## Token and cost accounting
+
+Every model call records input tokens, output tokens, cached input tokens and reasoning tokens (when the provider reports them). Calls through OpenRouter also record the cost OpenRouter itself reported. Each run in `runs.jsonl` has a `usage` block with the totals and a `per_call` breakdown. The progress line shows the tokens for every run.
+
+The report's **Tokens and cost** section shows, per model:
+
+- the number of runs and model calls;
+- input and output token totals;
+- mean tokens per run, and median and maximum tokens per run;
+- the cost and the cost per run;
+- where the cost comes from: the provider's own figure when every run reported one, otherwise `price_per_mtok` from the config;
+- mean tokens per run for each condition and kind.
+
+To project the cost of the full grid from a small test run:
+
+```bash
+python -m testbed run configs/pilot.yaml --limit 5
+python -m testbed plan configs/pilot.yaml --from runs/pilot
+```
+
+Runs that fail with a model error are not counted, so tokens spent before the failure are missing from the totals.
+
 ## What is logged
 
 `runs/<name>/runs.jsonl` holds one record per run attempt:
@@ -156,10 +194,10 @@ All names, addresses, keys and numbers are synthetic, and nothing leaves the pro
 ## Layout
 
 ```
-configs/      pilot.yaml (real models), mock.yaml (offline)
+configs/      pilot.yaml (real models), openrouter.yaml (OpenRouter), mock.yaml (offline)
 scenarios/    S01-S05 as YAML
 testbed/      conditions, signing, a2a, envelope, environment, prompts, coordinator, scoring, runner, report, cli
-testbed/models/  mock, anthropic, openai (and any OpenAI-compatible endpoint)
+testbed/models/  mock, anthropic, openai (and any OpenAI-compatible endpoint), openrouter
 tests/        design invariants, scoring and runner, provider adapters
 docs/         S01 rendered in all five conditions
 ```

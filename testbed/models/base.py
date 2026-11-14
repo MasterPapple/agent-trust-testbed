@@ -35,6 +35,9 @@ class Turn:
     stop_reason: str
     input_tokens: int = 0
     output_tokens: int = 0
+    cached_input_tokens: int = 0  # part of input_tokens served from a cache, when reported
+    reasoning_tokens: int = 0  # part of output_tokens spent on reasoning, when reported
+    reported_cost: float | None = None  # cost the provider itself reported (OpenRouter), in USD
     model_version: str = ""
     raw: Any = None
     extra: dict = field(default_factory=dict)
@@ -49,6 +52,9 @@ class Turn:
             "stop_reason": self.stop_reason,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cached_input_tokens": self.cached_input_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
+            "reported_cost": self.reported_cost,
             "model_version": self.model_version,
             "extra": self.extra,
             "raw": self.raw,

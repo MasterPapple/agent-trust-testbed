@@ -62,14 +62,22 @@ def run_episode(
     stop_reason = ""
     final_text = ""
     max_turns_reached = True
-    in_tok = out_tok = 0
+    calls_usage: list[dict] = []
     versions: set[str] = set()
     t0 = time.monotonic()
     for _ in range(max_turns):
         turn = session.step()
         turns.append({"type": "assistant", **turn.to_dict()})
-        in_tok += turn.input_tokens
-        out_tok += turn.output_tokens
+        calls_usage.append(
+            {
+                "input_tokens": turn.input_tokens,
+                "output_tokens": turn.output_tokens,
+                "cached_input_tokens": turn.cached_input_tokens,
+                "reasoning_tokens": turn.reasoning_tokens,
+                "reported_cost": turn.reported_cost,
+                "upstream_provider": turn.extra.get("upstream_provider"),
+            }
+        )
         if turn.model_version:
             versions.add(turn.model_version)
         stop_reason = turn.stop_reason
@@ -102,7 +110,23 @@ def run_episode(
         "n_model_turns": sum(1 for t in turns if t["type"] == "assistant"),
         "final_state": env.final_state(),
         "scores": score(scenario, env),
-        "usage": {"input_tokens": in_tok, "output_tokens": out_tok},
+        "usage": summarise_usage(calls_usage),
         "model_versions": sorted(versions),
         "duration_s": round(time.monotonic() - t0, 3),
+    }
+
+
+def summarise_usage(calls: list[dict]) -> dict:
+    """Token totals for one run, plus the per-call breakdown."""
+    costs = [c["reported_cost"] for c in calls if c.get("reported_cost") is not None]
+    return {
+        "model_calls": len(calls),
+        "input_tokens": sum(c["input_tokens"] for c in calls),
+        "output_tokens": sum(c["output_tokens"] for c in calls),
+        "cached_input_tokens": sum(c["cached_input_tokens"] for c in calls),
+        "reasoning_tokens": sum(c["reasoning_tokens"] for c in calls),
+        # Cost as reported by the provider (OpenRouter); None when no call reported one.
+        "reported_cost": round(sum(costs), 8) if costs else None,
+        "upstream_providers": sorted({c["upstream_provider"] for c in calls if c.get("upstream_provider")}),
+        "per_call": calls,
     }

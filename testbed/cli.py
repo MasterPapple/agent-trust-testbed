@@ -13,7 +13,7 @@ from .models import ModelError
 from .scenario import ScenarioError
 from .envelope import build_envelope, serialise_envelope
 from .prompts import system_prompt
-from .report import write_report
+from .report import load_runs, usage_by_model, write_report
 from .runner import build_grid, execute, load_config, resolve_path
 from .scenario import load_scenarios
 from .signing import KeyRing
@@ -61,15 +61,34 @@ def cmd_plan(args: argparse.Namespace) -> int:
     print(f"models: {[m['label'] for m in cfg['models']]}")
     print(f"runs: {len(grid)} total, {attack} attacked, {len(grid) - attack} benign controls")
     per_model = len(grid) // max(1, len(cfg["models"]))
-    tin, tout = args.tokens_in, args.tokens_out
-    print(f"\nRough token estimate at {tin:,} input and {tout:,} output tokens per run:")
+    measured: dict = {}
+    if args.from_run:
+        runs = [r for r in load_runs(Path(args.from_run) / "runs.jsonl") if r.get("status") == "ok"]
+        measured = usage_by_model(runs, {m["label"]: m.get("price_per_mtok") for m in cfg["models"]})
+        print(f"\nProjection from {len(runs)} finished runs in {args.from_run}:")
+    else:
+        print(f"\nRough estimate at an assumed {args.tokens_in:,} input and {args.tokens_out:,} output tokens per run"
+              " (use --from RUN_DIR after a small test run for measured numbers):")
     for m in cfg["models"]:
-        p = m.get("price_per_mtok") or {}
-        line = f"  {m['label']}: {per_model} runs, {per_model * tin / 1e6:.2f}M in, {per_model * tout / 1e6:.2f}M out"
-        if p.get("input") is not None and p.get("output") is not None:
-            line += f", about ${per_model * (tin * p['input'] + tout * p['output']) / 1e6:.2f}"
+        s = measured.get(m["label"])
+        if s:
+            tin, tout = s["mean_input_per_run"], s["mean_output_per_run"]
+            src = f"measured over {s['runs']} runs"
+        else:
+            tin, tout = args.tokens_in, args.tokens_out
+            src = "assumed" if not args.from_run else "assumed (no finished runs for this model yet)"
+        line = f"  {m['label']}: {per_model} runs x ({tin:,.0f} in + {tout:,.0f} out) = {per_model * tin / 1e6:.2f}M in, {per_model * tout / 1e6:.2f}M out [{src}]"
+        if s and s["cost_per_run"] is not None:
+            line += f", about ${per_model * s['cost_per_run']:.2f} ({s['cost_source']})"
+        else:
+            p = m.get("price_per_mtok") or {}
+            if p.get("input") is not None and p.get("output") is not None:
+                line += f", about ${per_model * (tin * p['input'] + tout * p['output']) / 1e6:.2f} (config price_per_mtok)"
+            else:
+                line += ", cost unknown (set price_per_mtok)"
         print(line)
-    print("Measure the real numbers with a small run first: python -m testbed run CONFIG --limit 5")
+    if not args.from_run:
+        print("Measure the real numbers with a small run first: python -m testbed run CONFIG --limit 5")
     return 0
 
 
@@ -117,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("config")
     pl.add_argument("--tokens-in", type=int, default=8000)
     pl.add_argument("--tokens-out", type=int, default=1000)
+    pl.add_argument("--from", dest="from_run", help="project from measured usage in an existing run directory")
     pl.set_defaults(fn=cmd_plan)
 
     r = sub.add_parser("run", help="run (or resume) an experiment")

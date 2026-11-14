@@ -109,3 +109,61 @@ def test_missing_key_and_placeholder_fail_fast(monkeypatch):
         build_model({"label": "c", "provider": "anthropic", "model": "claude-opus-5-5"})
     with pytest.raises(ModelError, match="exact model id"):
         build_model({"label": "o", "provider": "openai", "model": "REPLACE_WITH_OPENAI_MODEL_ID"})
+
+
+def test_openrouter_defaults_and_usage_accounting(monkeypatch):
+    from testbed.models import build_model
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+    m = build_model({"label": "or", "provider": "openrouter", "model": "vendor/model:free", "min_interval_s": 0})
+    assert str(m.client.base_url).startswith("https://openrouter.ai/api/v1")
+    assert m.extra_body == {"usage": {"include": True}}
+    assert m.max_tokens_param == "max_tokens"
+    sent = []
+    resp = openai.types.chat.ChatCompletion.model_validate({
+        "id": "c1", "object": "chat.completion", "created": 0, "model": "vendor/model:free",
+        "provider": "SomeUpstream",
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "Done."}}],
+        "usage": {"prompt_tokens": 1000, "completion_tokens": 50, "total_tokens": 1050, "cost": 0.0,
+                  "prompt_tokens_details": {"cached_tokens": 200},
+                  "completion_tokens_details": {"reasoning_tokens": 30}},
+    })
+
+    def fake_create(**kwargs):
+        sent.append(kwargs)
+        return resp
+
+    monkeypatch.setattr(m.client.chat.completions, "create", fake_create)
+    t = m.start("SYS", "USER", TOOL_SPECS).step()
+    assert sent[0]["extra_body"] == {"usage": {"include": True}}
+    assert sent[0]["max_tokens"] == 16000 and "max_completion_tokens" not in sent[0]
+    assert (t.input_tokens, t.output_tokens, t.cached_input_tokens, t.reasoning_tokens) == (1000, 50, 200, 30)
+    assert t.reported_cost == 0.0
+    assert t.extra["upstream_provider"] == "SomeUpstream"
+
+
+def test_report_prefers_provider_reported_cost():
+    from testbed.report import usage_by_model
+
+    def run(cost):
+        return {"model_label": "m", "usage": {"input_tokens": 1_000_000, "output_tokens": 0, "model_calls": 1,
+                                              "reported_cost": cost, "upstream_providers": []}}
+
+    stats = usage_by_model([run(0.25), run(0.25)], {"m": {"input": 3.0, "output": 15.0}})["m"]
+    assert stats["cost"] == 0.5 and stats["cost_source"] == "reported by provider"
+    # If any run lacks a reported cost, fall back to the config price table.
+    stats = usage_by_model([run(0.25), run(None)], {"m": {"input": 3.0, "output": 15.0}})["m"]
+    assert stats["cost"] == 6.0 and stats["cost_source"] == "config price_per_mtok"
+    stats = usage_by_model([run(None)], {})["m"]
+    assert stats["cost"] is None
+
+
+def test_throttle_spaces_requests(monkeypatch):
+    from testbed.models import openai_model
+
+    slept = []
+    monkeypatch.setattr(openai_model.time, "sleep", lambda s: slept.append(s))
+    openai_model._last_call.clear()
+    openai_model._throttle("x", 5.0)
+    openai_model._throttle("x", 5.0)
+    assert slept and 4.0 < slept[0] <= 5.0

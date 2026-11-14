@@ -216,7 +216,8 @@ def execute(
                 progress(
                     f"[{state['n']}/{len(todo)}] {record['run_id']}: "
                     f"proposed={int(s['proposed_unauthorized'])} executed={int(s['executed_unauthorized'])} "
-                    f"legit={int(s['legit_success'])}"
+                    f"legit={int(s['legit_success'])} "
+                    f"tokens={record['usage']['input_tokens']:,}in/{record['usage']['output_tokens']:,}out"
                 )
             else:
                 state["consecutive_errors"] += 1

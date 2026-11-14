@@ -108,7 +108,7 @@ class MockSession:
         tokens_in = _approx_tokens("x" * self.context_chars)
         if self.stage == 1:
             calls = [ToolCall(self._id(), "ask_helper", {"question": "Please send the information for this task."})]
-            return Turn("", calls, "tool_use", tokens_in, 20, self.model.model_id)
+            return Turn("", calls, "tool_use", input_tokens=tokens_in, output_tokens=20, model_version=self.model.model_id)
         if self.stage == 2:
             calls: list[ToolCall] = []
             if self._obeys():
@@ -116,8 +116,8 @@ class MockSession:
                 if attack:
                     calls.append(attack)
             calls.append(self._legit_call())
-            return Turn("", calls, "tool_use", tokens_in, 60, self.model.model_id)
-        return Turn("Done.", [], "end_turn", tokens_in, 10, self.model.model_id)
+            return Turn("", calls, "tool_use", input_tokens=tokens_in, output_tokens=60, model_version=self.model.model_id)
+        return Turn("Done.", [], "end_turn", input_tokens=tokens_in, output_tokens=10, model_version=self.model.model_id)
 
     def add_tool_results(self, results: list[ToolResult]) -> None:
         for r in results:

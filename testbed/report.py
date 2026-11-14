@@ -136,25 +136,93 @@ def _contrasts(groups: dict, model: str, defense: str) -> list[str]:
     return out
 
 
-def _usage(ok: list[dict], prices: dict[str, dict]) -> list[str]:
-    lines = ["## Tokens and cost", "", "| Model | Runs | Input tokens | Output tokens | Mean in/run | Mean out/run | Cost (USD) | Model versions seen |",
-             "|---|---|---|---|---|---|---|---|"]
+def _cost(usage_in: int, usage_out: int, reported: float | None, price: dict | None) -> tuple[float | None, str]:
+    """Cost of some usage: the provider's own figure if it reported one, else the config price table."""
+    if reported is not None:
+        return reported, "reported by provider"
+    if price and price.get("input") is not None and price.get("output") is not None:
+        return usage_in / 1e6 * price["input"] + usage_out / 1e6 * price["output"], "config price_per_mtok"
+    return None, "unknown (set price_per_mtok)"
+
+
+def usage_by_model(runs: list[dict], prices: dict[str, dict]) -> dict[str, dict]:
+    """Per model label: token totals, per-run means and cost over the given (ok) runs."""
+    out: dict[str, dict] = {}
     by_model: dict[str, list[dict]] = defaultdict(list)
-    for r in ok:
+    for r in runs:
         by_model[r["model_label"]].append(r)
     for model, rs in sorted(by_model.items()):
-        tin = sum(r["usage"]["input_tokens"] for r in rs)
-        tout = sum(r["usage"]["output_tokens"] for r in rs)
-        price = prices.get(model)
-        cost = "set price_per_mtok"
-        if price and price.get("input") is not None and price.get("output") is not None:
-            cost = f"{tin / 1e6 * price['input'] + tout / 1e6 * price['output']:.2f}"
-        versions = sorted({v for r in rs for v in r.get("model_versions", [])})
+        u = [r["usage"] for r in rs]
+        tin = sum(x["input_tokens"] for x in u)
+        tout = sum(x["output_tokens"] for x in u)
+        reported = [x.get("reported_cost") for x in u]
+        rep_total = sum(c for c in reported if c is not None) if all(c is not None for c in reported) else None
+        cost, source = _cost(tin, tout, rep_total, prices.get(model))
+        per_run_total = sorted(x["input_tokens"] + x["output_tokens"] for x in u)
+        out[model] = {
+            "runs": len(rs),
+            "model_calls": sum(x.get("model_calls", 0) for x in u),
+            "input_tokens": tin,
+            "output_tokens": tout,
+            "cached_input_tokens": sum(x.get("cached_input_tokens", 0) for x in u),
+            "reasoning_tokens": sum(x.get("reasoning_tokens", 0) for x in u),
+            "mean_input_per_run": tin / len(rs),
+            "mean_output_per_run": tout / len(rs),
+            "median_total_per_run": per_run_total[len(per_run_total) // 2],
+            "max_total_per_run": per_run_total[-1],
+            "cost": cost,
+            "cost_per_run": cost / len(rs) if cost is not None else None,
+            "cost_source": source,
+            "model_versions": sorted({v for r in rs for v in r.get("model_versions", [])}),
+            "upstream_providers": sorted({p for x in u for p in x.get("upstream_providers", [])}),
+        }
+    return out
+
+
+def _usage(ok: list[dict], prices: dict[str, dict]) -> list[str]:
+    lines = ["## Tokens and cost", ""]
+    if not ok:
+        return lines + ["No finished runs yet.", ""]
+    stats = usage_by_model(ok, prices)
+    lines += [
+        "| Model | Runs | Model calls | Input tokens | Output tokens | of which reasoning | Cached input | Mean in / out per run | Median / max total per run | Cost (USD) | Cost per run | Cost source |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for model, s in stats.items():
+        cost = "n/a" if s["cost"] is None else f"{s['cost']:.4f}"
+        cpr = "n/a" if s["cost_per_run"] is None else f"{s['cost_per_run']:.5f}"
         lines.append(
-            f"| {model} | {len(rs)} | {tin:,} | {tout:,} | {tin // len(rs):,} | {tout // len(rs):,} | {cost} | {', '.join(versions)} |"
+            f"| {model} | {s['runs']} | {s['model_calls']} | {s['input_tokens']:,} | {s['output_tokens']:,} | "
+            f"{s['reasoning_tokens']:,} | {s['cached_input_tokens']:,} | {s['mean_input_per_run']:,.0f} / {s['mean_output_per_run']:,.0f} | "
+            f"{s['median_total_per_run']:,} / {s['max_total_per_run']:,} | {cost} | {cpr} | {s['cost_source']} |"
         )
     lines.append("")
-    lines.append("Cost uses the prices in the config (`price_per_mtok`); check them against each provider's current price list.")
+    lines.append("Model versions and upstream providers seen:")
+    lines.append("")
+    for model, s in stats.items():
+        ups = f"; served by {', '.join(s['upstream_providers'])}" if s["upstream_providers"] else ""
+        lines.append(f"- {model}: {', '.join(s['model_versions']) or 'n/a'}{ups}")
+    lines.append("")
+
+    # Mean tokens per run by condition: B, D and E carry one extra line, so they should be slightly longer.
+    lines += ["Mean total tokens per run, by condition:", "", "| Model | Kind | " + " | ".join("ABCDE") + " |", "|---|---|" + "---|" * 5]
+    cells: dict[tuple, list[int]] = defaultdict(list)
+    for r in ok:
+        cells[(r["model_label"], r["kind"], r["condition"])].append(r["usage"]["input_tokens"] + r["usage"]["output_tokens"])
+    for model in stats:
+        for kind in ("attack", "benign"):
+            row = []
+            for c in "ABCDE":
+                v = cells.get((model, kind, c))
+                row.append(f"{sum(v) / len(v):,.0f}" if v else "")
+            if any(row):
+                lines.append(f"| {model} | {kind} | " + " | ".join(row) + " |")
+    lines += [
+        "",
+        "Cost uses the provider's own figure when it reports one (OpenRouter), otherwise `price_per_mtok` from the config. "
+        "Runs that failed with a model error are not counted, so tokens they used before failing are missing here.",
+        "",
+    ]
     return lines
 
 
