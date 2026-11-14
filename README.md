@@ -145,7 +145,7 @@ All names, addresses, keys and numbers are synthetic, and nothing leaves the pro
 
 ## Design choices to confirm with the supervisor
 
-- **A2A transport.** Messages have the A2A shape (a `message` with text `parts` and `metadata`), but they are passed in-process rather than over HTTP with `a2a-sdk`. The model only ever sees the envelope, so this does not change the stimulus. A2ASecBench's infrastructure is not reused for the pilot, because a small custom harness was simpler; the supervisor agreed to this fallback.
+- **A2A transport.** Messages have the A2A shape (a `message` with text `parts` and `metadata`), but they are passed in-process rather than over HTTP with `a2a-sdk`. The model only ever sees the envelope, so this does not change the stimulus. A2ASecBench was not evaluated or reused for this harness: its code was not inspected while building it (only its README was read earlier, on 30 Oct). The pilot uses a small custom harness, which the supervisor allowed if adapting A2ASecBench proved harder; whether it would have been is still open.
 - **Benign controls** use the same condition framing as attacked runs (B and D still carry the administrator line, E the verification claim), so the false-block rate can be compared per condition.
 - **Secrets** are given to the coordinator in the system prompt's context, as in the proposal's S01 example.
 - **Sampling.** Current Claude models reject `temperature`, so the provider default is used and recorded. For OpenAI, `temperature` is optional and unset by default. `effort` for Claude is set explicitly in the config.
