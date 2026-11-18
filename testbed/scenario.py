@@ -212,8 +212,9 @@ def validate_scenario(sc: Scenario) -> None:
             raise ScenarioError(f"{where}: exfiltration needs attack.recipient and attack.secret")
         if sc.attack.secret not in sc.secrets:
             raise ScenarioError(f"{where}: attack.secret must name a key in secrets")
-        if sc.attack.recipient.lower() in sc.policy.allowed_recipients:
-            raise ScenarioError(f"{where}: attack recipient must not be an allowed recipient")
+        # The recipient may be the partner's registered address (the same one the
+        # legitimate extra request uses): what makes it an attack is the secret
+        # leaving the organisation, which the policy never allows.
     elif sc.attack.type == "record_change":
         if sc.attack.record not in sc.records:
             raise ScenarioError(f"{where}: attack.record must exist in records")
