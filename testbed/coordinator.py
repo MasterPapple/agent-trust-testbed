@@ -13,7 +13,7 @@ from .environment import TOOL_SPECS, Environment
 from .models.base import Model, ToolResult
 from .prompts import system_prompt, user_message
 from .scenario import Scenario
-from .scoring import score
+from .scoring import outcomes, score
 from .signing import KeyRing
 
 
@@ -98,6 +98,8 @@ def run_episode(
             turns.append({"type": "tool_result", **ev.to_dict()})
         session.add_tool_results(results)
 
+    scores = score(scenario, env)
+    manip = manipulation_check(turns, condition)
     return {
         "task_id": task_id,
         "system_prompt": system,
@@ -110,9 +112,10 @@ def run_episode(
         "max_turns_reached": max_turns_reached,
         "n_model_turns": sum(1 for t in turns if t["type"] == "assistant"),
         "final_state": env.final_state(),
-        "scores": score(scenario, env),
+        "scores": scores,
         # Logged next to the scores, never used for them.
-        "manipulation_check": manipulation_check(turns, condition),
+        "manipulation_check": manip,
+        "outcomes": outcomes(scores, kind, manip),
         "usage": summarise_usage(calls_usage),
         "model_versions": sorted(versions),
         "duration_s": round(time.monotonic() - t0, 3),

@@ -200,3 +200,22 @@ def test_manipulation_check_reads_reasoning_separately():
     mc = check(turns, get_condition("C"))
     assert not mc["mentions_verification"] and mc["mentions_verification_in_reasoning"]
     assert mc["reasoning_available"] and mc["condition_signal_mentioned"]
+
+
+def test_four_outcomes_per_run_and_in_report(tmp_path):
+    keyring = KeyRing()
+    sc = SCENARIOS["S02"]
+    att = run_episode(MockModel("m", "selective"), sc, get_condition("C"), "attack", "none", keyring)["outcomes"]
+    ext = run_episode(MockModel("m", "selective"), sc, get_condition("C"), "benign_extra", "none", keyring)["outcomes"]
+    plain = run_episode(MockModel("m", "selective"), sc, get_condition("A"), "benign", "none", keyring)["outcomes"]
+    assert att == {"main_task_done": True, "benign_extra_followed": None, "malicious_extra_refused": True, "signal_mentioned": False}
+    assert ext["benign_extra_followed"] is True and ext["malicious_extra_refused"] is None
+    assert plain["signal_mentioned"] is None and plain["benign_extra_followed"] is None
+
+    cfg = load_config(ROOT / "configs" / "mock.yaml")
+    log = execute(cfg, out_dir=tmp_path, progress=lambda m: None)
+    text, _ = summarise(log)
+    assert "## Four outcomes per condition" in text and "Malicious extra refused" in text
+    from testbed.report import write_report
+    write_report(log)
+    assert (tmp_path / "outcomes.csv").exists()

@@ -218,10 +218,13 @@ def execute(
             if record["status"] == "ok":
                 state["consecutive_errors"] = 0
                 s = record["scores"]
+                o = record["outcomes"]
+                fmt = lambda v: "-" if v is None else int(v)  # noqa: E731
                 progress(
                     f"[{state['n']}/{len(todo)}] {record['run_id']}: "
                     f"proposed={int(s['proposed_unauthorized'])} executed={int(s['executed_unauthorized'])} "
-                    f"legit={int(s['legit_success'])} "
+                    f"task={fmt(o['main_task_done'])} extra={fmt(o['benign_extra_followed'])} "
+                    f"refused={fmt(o['malicious_extra_refused'])} signal={fmt(o['signal_mentioned'])} "
                     f"tokens={record['usage']['input_tokens']:,}in/{record['usage']['output_tokens']:,}out"
                 )
             else:
