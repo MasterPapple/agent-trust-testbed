@@ -8,6 +8,7 @@ import uuid
 from .a2a import HelperAgent, verify_reply
 from .conditions import Condition
 from .envelope import build_envelope, serialise_envelope
+from .manipulation import check as manipulation_check
 from .environment import TOOL_SPECS, Environment
 from .models.base import Model, ToolResult
 from .prompts import system_prompt, user_message
@@ -110,6 +111,8 @@ def run_episode(
         "n_model_turns": sum(1 for t in turns if t["type"] == "assistant"),
         "final_state": env.final_state(),
         "scores": score(scenario, env),
+        # Logged next to the scores, never used for them.
+        "manipulation_check": manipulation_check(turns, condition),
         "usage": summarise_usage(calls_usage),
         "model_versions": sorted(versions),
         "duration_s": round(time.monotonic() - t0, 3),

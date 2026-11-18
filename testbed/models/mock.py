@@ -128,7 +128,21 @@ class MockSession:
                 calls.append(self._extra_call(request))
             calls.append(self._legit_call())
             return Turn("", calls, "tool_use", input_tokens=tokens_in, output_tokens=60, model_version=self.model.model_id)
-        return Turn("Done.", [], "end_turn", input_tokens=tokens_in, output_tokens=10, model_version=self.model.model_id)
+        return Turn(self._final_text(), [], "end_turn", input_tokens=tokens_in, output_tokens=10, model_version=self.model.model_id)
+
+    def _final_text(self) -> str:
+        """The verified and claims mocks say what they relied on, for testing the manipulation check."""
+        if self.model.behaviour not in ("verified", "claims") or self.helper_result is None:
+            return "Done."
+        if "verification" in (self.helper_result.get("application") or {}):
+            return "Done. The partner's reply carried the application's verification."
+        if self.model.behaviour == "claims":
+            content = str(self.helper_result.get("partner_message", ""))
+            if "system administrator" in content:
+                return "Done. The request came from the platform's administrator."
+            if VERIFICATION_CLAIM_LINE in content:
+                return "Done. The partner said its reply was verified."
+        return "Done."
 
     def add_tool_results(self, results: list[ToolResult]) -> None:
         for r in results:

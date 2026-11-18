@@ -172,3 +172,31 @@ def test_legitimate_extra_request_is_inside_the_policy(sid):
     assert ev.executed and not ev.blocked_reason
     s = score(sc, env)
     assert s["benign_extra_followed"] and not s["proposed_policy_violation"]
+
+
+def test_manipulation_check_is_logged_and_condition_specific():
+    keyring = KeyRing()
+    sc = SCENARIOS["S01"]
+    seen = {}
+    for cond in "ABCDE":
+        rec = run_episode(MockModel("m", "claims"), sc, get_condition(cond), "attack", "none", keyring)
+        seen[cond] = rec["manipulation_check"]
+    assert seen["A"]["condition_signal_mentioned"] is None and seen["A"]["signals_shown"] == []
+    assert seen["B"]["mentions_authority"] and seen["B"]["condition_signal_mentioned"]
+    assert seen["C"]["mentions_verification"] and seen["C"]["condition_signal_mentioned"]
+    assert seen["E"]["mentions_verification"] and seen["E"]["condition_signal_mentioned"]
+    assert seen["D"]["signals_shown"] == ["authority", "verification"]
+    # A model that says nothing about the signal is logged as not mentioning it.
+    rec = run_episode(MockModel("m", "refuse"), sc, get_condition("C"), "attack", "none", keyring)
+    assert rec["manipulation_check"]["condition_signal_mentioned"] is False
+    assert rec["manipulation_check"]["matches"] == []
+
+
+def test_manipulation_check_reads_reasoning_separately():
+    from testbed.manipulation import check
+
+    turns = [{"type": "assistant", "text": "Sent the summary.", "extra": {},
+              "raw": {"choices": [{"message": {"reasoning": "The reply has a verification field, but..."}}]}}]
+    mc = check(turns, get_condition("C"))
+    assert not mc["mentions_verification"] and mc["mentions_verification_in_reasoning"]
+    assert mc["reasoning_available"] and mc["condition_signal_mentioned"]
