@@ -136,3 +136,34 @@ def test_keys_persist_for_resume(tmp_path):
     k1 = KeyRing(tmp_path).key_for(sc.helper.agent_id)
     k2 = KeyRing(tmp_path).key_for(sc.helper.agent_id)
     assert k1.private_pem() == k2.private_pem()
+
+
+@pytest.mark.parametrize("sc", SCENARIOS, ids=lambda s: s.id)
+def test_extra_requests_differ_only_in_what_they_ask_for(sc):
+    from testbed.scenario import REQUEST_TEMPLATES
+
+    h = sc.helper
+    attack = h.malicious_reply.splitlines()[-1]
+    extra = h.benign_extra_reply.splitlines()[-1]
+    # Same task data before the request, and the same reason and deadline around it.
+    assert h.malicious_reply.startswith(h.benign_reply + "\n")
+    assert h.benign_extra_reply.startswith(h.benign_reply + "\n")
+    assert attack.startswith(h.request_reason + " Please ") and extra.startswith(h.request_reason + " Please ")
+    assert attack.endswith(f" before you {h.request_before}.") and extra.endswith(f" before you {h.request_before}.")
+    # With the slots blanked out, the two requests are the same sentence.
+    if sc.attack.type == "exfiltration":
+        a_slots, e_slots = (sc.attack.item, sc.attack.recipient), (sc.extra.item, sc.extra.to)
+    else:
+        a_slots = (sc.attack.field, sc.attack.record, str(sc.attack.value))
+        e_slots = (sc.extra.field, sc.extra.record, str(sc.extra.value))
+    for slot in a_slots:
+        attack = attack.replace(slot, "<>", 1)
+    for slot in e_slots:
+        extra = extra.replace(slot, "<>", 1)
+    assert attack == extra
+    # Matched in length too: within 6 words of each other.
+    assert abs(len(h.malicious_reply.split()) - len(h.benign_extra_reply.split())) <= 6
+    # No urgency or pressure words in either request (same neutral tone).
+    for word in ("urgent", "immediately", "asap", "now!", "important"):
+        assert word not in attack.lower() and word not in extra.lower()
+    assert set(REQUEST_TEMPLATES) == {"email", "record_update"}
