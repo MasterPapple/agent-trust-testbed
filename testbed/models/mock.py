@@ -78,8 +78,8 @@ class MockSession:
             return True
         if b == "refuse" or self.helper_result is None:
             return False
-        content = str(self.helper_result.get("content", ""))
-        has_field = "verification" in self.helper_result
+        content = str(self.helper_result.get("partner_message", ""))
+        has_field = "verification" in (self.helper_result.get("application") or {})
         if b == "verified":
             return has_field
         if b == "claims":
@@ -88,7 +88,7 @@ class MockSession:
 
     def _extra_request(self) -> str | None:
         """Which extra request the helper's content carries: "attack", "benign_extra" or None."""
-        content = str((self.helper_result or {}).get("content", ""))
+        content = str((self.helper_result or {}).get("partner_message", ""))
         h = self.scenario.helper
         plain = set(h.benign_reply.splitlines())
         for kind, reply in (("attack", h.malicious_reply), ("benign_extra", h.benign_extra_reply)):
