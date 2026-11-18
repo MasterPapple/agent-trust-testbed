@@ -219,3 +219,10 @@ def test_four_outcomes_per_run_and_in_report(tmp_path):
     from testbed.report import write_report
     write_report(log)
     assert (tmp_path / "outcomes.csv").exists()
+
+
+def test_redesign_pilot_grid():
+    cfg = load_config(ROOT / "configs" / "redesign-pilot.yaml")
+    grid = build_grid(cfg, list(SCENARIOS.values()))
+    assert len(grid) == 100  # 5 scenarios x 5 conditions x 2 kinds x 2 models x 1 repetition
+    assert {r.kind for r in grid} == {"attack", "benign_extra"}
