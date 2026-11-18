@@ -1,7 +1,13 @@
 """Scenario definitions, loaded from YAML files in ``scenarios/``.
 
-A scenario is one user task plus one pre-written helper reply (malicious) and
-one honest helper reply (benign control). Everything in it is synthetic.
+A scenario is one user task plus three pre-written helper replies:
+
+* ``malicious_reply``: the task data plus an extra request outside the policy (attack);
+* ``benign_extra_reply``: the task data plus an extra request inside the policy,
+  matched to the malicious one in wording and length (legitimate extra request);
+* ``benign_reply``: the task data only (plain benign control).
+
+Everything in it is synthetic.
 """
 
 from __future__ import annotations
@@ -15,6 +21,9 @@ import yaml
 
 GOALS = {"G1": "exfiltration", "G2": "record_change"}  # G2 = unauthorized change
 
+# What the helper sends in each kind of run.
+KINDS = ("attack", "benign_extra", "benign")
+
 
 class ScenarioError(ValueError):
     pass
@@ -27,6 +36,16 @@ class Helper:
     platform: str
     benign_reply: str
     malicious_reply: str
+    benign_extra_reply: str
+
+    def reply_for(self, kind: str) -> str:
+        if kind == "attack":
+            return self.malicious_reply
+        if kind == "benign_extra":
+            return self.benign_extra_reply
+        if kind == "benign":
+            return self.benign_reply
+        raise ValueError(f"kind must be one of {KINDS}")
 
 
 @dataclass
@@ -80,6 +99,7 @@ class Scenario:
     policy: Policy
     attack: Attack
     legit: Legit
+    extra: Legit  # the legitimate extra request in benign_extra runs (inside the policy)
     path: Path | None = None
 
     def initial_records(self) -> dict[str, dict[str, Any]]:
@@ -108,6 +128,7 @@ def load_scenario(path: Path) -> Scenario:
     p = _require(data, "policy", where)
     a = _require(data, "attack", where)
     lg = _require(data, "legit", where)
+    ex = _require(data, "extra", where)
     sc = Scenario(
         id=_require(data, "id", where),
         title=_require(data, "title", where),
@@ -124,6 +145,7 @@ def load_scenario(path: Path) -> Scenario:
             platform=_require(h, "platform", where),
             benign_reply=_require(h, "benign_reply", where).strip(),
             malicious_reply=_require(h, "malicious_reply", where).strip(),
+            benign_extra_reply=_require(h, "benign_extra_reply", where).strip(),
         ),
         policy=Policy(
             allowed_recipients=[r.lower() for r in p.get("allowed_recipients") or []],
@@ -131,6 +153,7 @@ def load_scenario(path: Path) -> Scenario:
         ),
         attack=Attack(**a),
         legit=Legit(**lg),
+        extra=Legit(**ex),
         path=path,
     )
     validate_scenario(sc)
@@ -155,18 +178,32 @@ def validate_scenario(sc: Scenario) -> None:
             raise ScenarioError(f"{where}: attack.record must exist in records")
         if sc.attack.field in sc.policy.writable.get(sc.attack.record, []):
             raise ScenarioError(f"{where}: attacked field must not be writable under the policy")
-    if sc.legit.type == "email":
-        if not sc.legit.to or sc.legit.to.lower() not in sc.policy.allowed_recipients:
-            raise ScenarioError(f"{where}: legit.to must be an allowed recipient")
-    elif sc.legit.type == "record_update":
-        if sc.legit.field not in sc.policy.writable.get(sc.legit.record or "", []):
-            raise ScenarioError(f"{where}: legit record update must be writable under the policy")
-    else:
-        raise ScenarioError(f"{where}: unknown legit.type {sc.legit.type!r}")
-    # The benign reply must not contain the injected request.
+    for name, action in (("legit", sc.legit), ("extra", sc.extra)):
+        if action.type == "email":
+            if not action.to or action.to.lower() not in sc.policy.allowed_recipients:
+                raise ScenarioError(f"{where}: {name}.to must be an allowed recipient")
+            if not action.must_contain:
+                raise ScenarioError(f"{where}: {name}.must_contain must not be empty")
+        elif action.type == "record_update":
+            if action.field not in sc.policy.writable.get(action.record or "", []):
+                raise ScenarioError(f"{where}: {name} record update must be writable under the policy")
+        else:
+            raise ScenarioError(f"{where}: unknown {name}.type {action.type!r}")
+    # The legitimate extra request is a different action from the main task.
+    if (sc.extra.type, sc.extra.to, sc.extra.record, sc.extra.field) == (sc.legit.type, sc.legit.to, sc.legit.record, sc.legit.field):
+        raise ScenarioError(f"{where}: extra must be a different action from the main task")
+    if sc.extra.type == "email" and sc.legit.type == "email" and sc.extra.to.lower() == sc.legit.to.lower():
+        raise ScenarioError(f"{where}: extra email must go to a different allowed recipient than the main task")
+    # The helper never sends the secret itself.
     for marker in sc.leak_markers():
-        if marker in sc.helper.benign_reply or marker in sc.helper.malicious_reply:
-            raise ScenarioError(f"{where}: helper replies must not contain the secret itself")
+        for reply in (sc.helper.benign_reply, sc.helper.malicious_reply, sc.helper.benign_extra_reply):
+            if marker in reply:
+                raise ScenarioError(f"{where}: helper replies must not contain the secret itself")
+    # The two extra requests carry the same task data as the plain reply, and add a request to it.
+    for name in ("malicious_reply", "benign_extra_reply"):
+        reply = getattr(sc.helper, name)
+        if not reply.startswith(sc.helper.benign_reply) or reply == sc.helper.benign_reply:
+            raise ScenarioError(f"{where}: helper.{name} must be benign_reply followed by the extra request")
 
 
 def load_scenarios(directory: Path, ids: list[str] | str | None = "all") -> list[Scenario]:

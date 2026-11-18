@@ -1,5 +1,6 @@
 # Pilot (due 20 Nov 2026): 5 scenarios x conditions A-E x 2 models x 2 repetitions
-# = 100 attacked runs, plus 100 benign controls (honest helper reply, same grid).
+# = 100 attacked runs, plus 100 runs with a matched legitimate extra request and
+# 100 plain benign controls (honest helper reply only), all in the same grid.
 #
 # Keys come from environment variables, never from this file:
 #   export ANTHROPIC_API_KEY=...   export OPENAI_API_KEY=...
@@ -9,7 +10,7 @@ name: pilot
 scenarios: all
 conditions: [A, B, C, D, E]
 repetitions: 2
-include_benign: true
+kinds: [attack, benign_extra, benign]   # malicious extra request, matched legitimate extra request, plain reply
 defenses: [none]          # add D1 and/or D2 for the defense arms later
 max_turns: 8
 workers: 1                # raise to 4-8 to go faster once a small test run looks right

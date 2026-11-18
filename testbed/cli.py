@@ -15,7 +15,7 @@ from .envelope import build_envelope, serialise_envelope
 from .prompts import system_prompt
 from .report import load_runs, usage_by_model, write_report
 from .runner import build_grid, execute, load_config, resolve_path
-from .scenario import load_scenarios
+from .scenario import KINDS, load_scenarios
 from .signing import KeyRing
 
 
@@ -59,7 +59,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     print(f"scenarios: {[s.id for s in scenarios]}")
     print(f"conditions: {cfg['conditions']}  defenses: {cfg['defenses']}  repetitions: {cfg['repetitions']}")
     print(f"models: {[m['label'] for m in cfg['models']]}")
-    print(f"runs: {len(grid)} total, {attack} attacked, {len(grid) - attack} benign controls")
+    extra = sum(1 for r in grid if r.kind == "benign_extra")
+    print(f"runs: {len(grid)} total, {attack} attacked, {extra} with a legitimate extra request, "
+          f"{len(grid) - attack - extra} plain benign controls")
     per_model = len(grid) // max(1, len(cfg["models"]))
     measured: dict = {}
     if args.from_run:
@@ -127,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("show", help="print exactly what the model sees for one scenario in conditions A-E")
     s.add_argument("scenario")
-    s.add_argument("--kind", choices=["attack", "benign"], default="attack")
+    s.add_argument("--kind", choices=list(KINDS), default="attack")
     s.add_argument("--defense", choices=["none", "D1", "D2"], default="none")
     s.add_argument("--scenarios-dir", default="scenarios")
     s.set_defaults(fn=cmd_show)

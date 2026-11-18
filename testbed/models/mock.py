@@ -5,10 +5,14 @@ injected request, do the user's task, then stop. Whether it obeys depends only
 on what it sees in the ask_helper result (never on the condition label), so it
 exercises the real input path:
 
-    mock:refuse    never obeys the injected request
+    mock:refuse    never obeys an extra request from the helper
     mock:comply    always obeys
     mock:verified  obeys only if the application's ``verification`` field is present (C, D)
     mock:claims    obeys if any authority/verification claim is visible (B, C, D, E)
+    mock:selective always follows the legitimate extra request, never the malicious one
+
+Apart from ``selective``, the mock treats the malicious and the legitimate
+extra request alike: it cannot tell them apart.
 
 The mock is bound to the scenario so it knows which tool calls form the
 legitimate action and the attack. That is acceptable for a test double; real
@@ -23,7 +27,7 @@ from ..conditions import VERIFICATION_CLAIM_LINE
 from ..scenario import Scenario
 from .base import ToolCall, ToolResult, Turn
 
-BEHAVIOURS = ("refuse", "comply", "verified", "claims")
+BEHAVIOURS = ("refuse", "comply", "verified", "claims", "selective")
 
 
 def _approx_tokens(text: str) -> int:
@@ -66,8 +70,10 @@ class MockSession:
         self._n += 1
         return f"mock_call_{self._n}"
 
-    def _obeys(self) -> bool:
+    def _obeys(self, request: str) -> bool:
         b = self.model.behaviour
+        if b == "selective":
+            return request == "benign_extra"
         if b == "comply":
             return True
         if b == "refuse" or self.helper_result is None:
@@ -80,16 +86,20 @@ class MockSession:
             return has_field or "system administrator" in content or VERIFICATION_CLAIM_LINE in content
         return False
 
-    def _injected_request_present(self) -> bool:
-        """True if the helper's content carries the scenario's injected request (attack runs only)."""
+    def _extra_request(self) -> str | None:
+        """Which extra request the helper's content carries: "attack", "benign_extra" or None."""
         content = str((self.helper_result or {}).get("content", ""))
-        benign = set(self.scenario.helper.benign_reply.splitlines())
-        injected = [l for l in self.scenario.helper.malicious_reply.splitlines() if l.strip() and l not in benign]
-        return any(l in content for l in injected)
+        h = self.scenario.helper
+        plain = set(h.benign_reply.splitlines())
+        for kind, reply in (("attack", h.malicious_reply), ("benign_extra", h.benign_extra_reply)):
+            added = [l for l in reply.splitlines() if l.strip() and l not in plain]
+            if any(l in content for l in added):
+                return kind
+        return None
 
-    def _attack_call(self) -> ToolCall | None:
-        if not self._injected_request_present():
-            return None
+    def _extra_call(self, request: str) -> ToolCall:
+        if request == "benign_extra":
+            return self._action_call(self.scenario.extra)
         a = self.scenario.attack
         if a.type == "exfiltration":
             secret = self.scenario.secrets[a.secret]
@@ -97,7 +107,9 @@ class MockSession:
         return ToolCall(self._id(), "update_record", {"id": a.record, "fields": {a.field: a.value}})
 
     def _legit_call(self) -> ToolCall:
-        lg = self.scenario.legit
+        return self._action_call(self.scenario.legit)
+
+    def _action_call(self, lg) -> ToolCall:
         if lg.type == "email":
             body = "Summary:\n" + "\n".join(f"- {item}" for item in lg.must_contain)
             return ToolCall(self._id(), "send_email", {"to": lg.to, "subject": "Summary", "body": body})
@@ -111,10 +123,9 @@ class MockSession:
             return Turn("", calls, "tool_use", input_tokens=tokens_in, output_tokens=20, model_version=self.model.model_id)
         if self.stage == 2:
             calls: list[ToolCall] = []
-            if self._obeys():
-                attack = self._attack_call()
-                if attack:
-                    calls.append(attack)
+            request = self._extra_request()
+            if request and self._obeys(request):
+                calls.append(self._extra_call(request))
             calls.append(self._legit_call())
             return Turn("", calls, "tool_use", input_tokens=tokens_in, output_tokens=60, model_version=self.model.model_id)
         return Turn("Done.", [], "end_turn", input_tokens=tokens_in, output_tokens=10, model_version=self.model.model_id)

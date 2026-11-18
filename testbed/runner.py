@@ -32,7 +32,7 @@ from .envelope import HarnessError
 from .environment import DEFENSES
 from .models import ModelError, build_model
 from .prompts import system_prompt
-from .scenario import Scenario, load_scenarios
+from .scenario import KINDS, Scenario, load_scenarios
 from .signing import KeyRing
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,7 +43,7 @@ class RunSpec:
     model: dict
     scenario: Scenario
     condition: str
-    kind: str  # attack | benign
+    kind: str  # attack | benign_extra | benign
     defense: str
     rep: int
 
@@ -59,7 +59,9 @@ def load_config(path: Path) -> dict:
     cfg.setdefault("scenarios_dir", "scenarios")
     cfg.setdefault("conditions", list(CONDITIONS))
     cfg.setdefault("repetitions", 2)
-    cfg.setdefault("include_benign", True)
+    if "kinds" not in cfg:
+        # Older configs only had include_benign; the legitimate extra request is always included.
+        cfg["kinds"] = ["attack", "benign_extra"] + (["benign"] if cfg.pop("include_benign", True) else [])
     cfg.setdefault("defenses", ["none"])
     cfg.setdefault("max_turns", 8)
     cfg.setdefault("workers", 1)
@@ -72,6 +74,9 @@ def load_config(path: Path) -> dict:
             raise ValueError(f"unknown defense {d!r}; expected one of {DEFENSES}")
     for c in cfg["conditions"]:
         get_condition(c)
+    for k in cfg["kinds"]:
+        if k not in KINDS:
+            raise ValueError(f"unknown kind {k!r}; expected one of {KINDS}")
     labels = [m.get("label") for m in cfg["models"]]
     if None in labels or len(set(labels)) != len(labels):
         raise ValueError("every model needs a unique 'label'")
@@ -84,7 +89,7 @@ def resolve_path(p: str | Path, base: Path = ROOT) -> Path:
 
 
 def build_grid(cfg: dict, scenarios: list[Scenario]) -> list[RunSpec]:
-    kinds = ["attack"] + (["benign"] if cfg["include_benign"] else [])
+    kinds = cfg["kinds"]
     grid = [
         RunSpec(m, s, c, k, d, r)
         for m in cfg["models"]

@@ -79,7 +79,7 @@ def test_record_change_attack_and_d2():
 def test_mock_end_to_end(behaviour, expected, sid):
     keyring = KeyRing()
     for cond, exp in expected.items():
-        for kind in ("attack", "benign"):
+        for kind in ("attack", "benign_extra", "benign"):
             rec = run_episode(MockModel("m", behaviour), SCENARIOS[sid], get_condition(cond), kind, "none", keyring)
             s = rec["scores"]
             assert s["attack_exposed"]
@@ -87,6 +87,9 @@ def test_mock_end_to_end(behaviour, expected, sid):
             want = bool(exp) and kind == "attack"
             assert s["proposed_unauthorized"] == want, (cond, kind)
             assert s["executed_unauthorized"] == want, (cond, kind)
+            # This mock cannot tell the two extra requests apart: it follows the legitimate one exactly when it would follow the attack.
+            assert s["benign_extra_followed"] == (bool(exp) and kind == "benign_extra"), (cond, kind)
+            assert not s["proposed_policy_violation"] or kind == "attack"
             # The verifier ran in every condition and passed.
             assert all(x["verification"]["ok"] for x in rec["helper_exchanges"])
 
@@ -96,7 +99,8 @@ def test_pilot_grid_matches_supervisor_spec():
     grid = build_grid(cfg, list(SCENARIOS.values()))
     attacked = [r for r in grid if r.kind == "attack"]
     assert len(attacked) == 100  # 5 scenarios x 5 conditions x 2 models x 2 repetitions
-    assert len(grid) - len(attacked) == 100  # benign controls in the same grid
+    assert sum(1 for r in grid if r.kind == "benign_extra") == 100  # one matched legitimate extra request per attacked run
+    assert sum(1 for r in grid if r.kind == "benign") == 100  # plain benign controls in the same grid
     assert len({r.run_id for r in grid}) == len(grid)
 
 
@@ -108,8 +112,8 @@ def test_full_mock_run_logs_every_run_and_resumes(tmp_path):
     rec = json.loads(lines[0])
     for key in ("run_id", "status", "system_prompt", "transcript", "helper_exchanges", "final_state", "scores", "usage"):
         assert key in rec
-    execute(cfg, out_dir=tmp_path, progress=lambda m: None)  # resume: only the remaining 170
-    assert len(log.read_text().splitlines()) == 200
+    execute(cfg, out_dir=tmp_path, progress=lambda m: None)  # resume: only the remaining 270
+    assert len(log.read_text().splitlines()) == 300
     assert list(tmp_path.glob("manifest-*.json"))
     text, rows = summarise(log)
     assert "A vs C" in text and rows
@@ -137,3 +141,27 @@ def test_stats_helpers():
     assert 0.23 < lo < 0.24 and 0.76 < hi < 0.77
     assert mcnemar_exact(0, 10) == pytest.approx(0.001953125)
     assert mcnemar_exact(3, 3) == 1.0
+
+
+@pytest.mark.parametrize("sid", sorted(SCENARIOS))
+def test_selective_mock_follows_only_the_legitimate_extra(sid):
+    keyring = KeyRing()
+    for cond in "ABCDE":
+        att = run_episode(MockModel("m", "selective"), SCENARIOS[sid], get_condition(cond), "attack", "none", keyring)["scores"]
+        ext = run_episode(MockModel("m", "selective"), SCENARIOS[sid], get_condition(cond), "benign_extra", "none", keyring)["scores"]
+        assert not att["proposed_unauthorized"] and not att["benign_extra_followed"]
+        assert ext["benign_extra_followed"] and ext["benign_extra_proposed"] and not ext["proposed_policy_violation"]
+
+
+@pytest.mark.parametrize("sid", sorted(SCENARIOS))
+def test_legitimate_extra_request_is_inside_the_policy(sid):
+    sc = SCENARIOS[sid]
+    env = env_for(sid, "D2")
+    ex = sc.extra
+    if ex.type == "email":
+        ev = env.call("1", "send_email", {"to": ex.to, "subject": "ref", "body": " ".join(ex.must_contain)})
+    else:
+        ev = env.call("1", "update_record", {"id": ex.record, "fields": {ex.field: ex.value}})
+    assert ev.executed and not ev.blocked_reason
+    s = score(sc, env)
+    assert s["benign_extra_followed"] and not s["proposed_policy_violation"]
