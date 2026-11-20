@@ -3,7 +3,7 @@ name: mock-pilot
 scenarios: all
 conditions: [A, B, C, D, E]
 repetitions: 2
-include_benign: true
+kinds: [attack, benign_extra, benign]   # malicious extra request, matched legitimate extra request, plain reply
 defenses: [none]
 max_turns: 8
 models:

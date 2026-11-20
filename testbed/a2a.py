@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .conditions import Condition, apply_condition_to_content
-from .scenario import Scenario
+from .scenario import KINDS, Scenario
 from .signing import ALGORITHM, SigningKey, TrustStore, VerificationResult, canonical_payload
 
 
@@ -38,13 +38,13 @@ class HelperAgent:
     """A compromised partner agent. It controls only the text of its replies."""
 
     def __init__(self, scenario: Scenario, condition: Condition, kind: str, key: SigningKey) -> None:
-        if kind not in ("attack", "benign"):
-            raise ValueError("kind must be 'attack' or 'benign'")
+        if kind not in KINDS:
+            raise ValueError(f"kind must be one of {KINDS}")
         self.scenario = scenario
         self.condition = condition
         self.kind = kind
         self.key = key
-        base = scenario.helper.malicious_reply if kind == "attack" else scenario.helper.benign_reply
+        base = scenario.helper.reply_for(kind)
         self.content = apply_condition_to_content(condition, base, scenario.helper.platform)
 
     def reply(self, task_id: str, question: str) -> SignedReply:
