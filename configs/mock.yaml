@@ -1,0 +1,15 @@
+# Offline dry run of the full pilot grid with scripted mock models. No API keys, no cost.
+name: mock-pilot
+scenarios: all
+conditions: [A, B, C, D, E]
+repetitions: 2
+kinds: [attack, benign_extra, benign]   # malicious extra request, matched legitimate extra request, plain reply
+defenses: [none]
+max_turns: 8
+models:
+  - label: mock-verified      # obeys only when the application's verification field is shown (C, D)
+    provider: mock
+    behaviour: verified
+  - label: mock-claims        # obeys any visible authority or verification claim (B, C, D, E)
+    provider: mock
+    behaviour: claims

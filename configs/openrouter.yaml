@@ -1,0 +1,38 @@
+# Pilot grid through OpenRouter, e.g. with free models while testing the setup.
+#   export OPENROUTER_API_KEY=sk-or-...
+#
+# Pick models on https://openrouter.ai/models: filter for free models AND tool
+# calling support. A model without tool calling cannot be used here (every run
+# would fail, and the runner stops after 5 errors in a row).
+#
+# Free models have tight rate limits and can change or disappear, and OpenRouter
+# may route one model id to different upstream providers. The upstream provider
+# is logged for every call. Fine for testing the pipeline; for thesis results,
+# pin exact paid model versions.
+name: openrouter-pilot
+scenarios: all
+conditions: [A, B, C, D, E]
+repetitions: 2
+kinds: [attack, benign_extra, benign]   # malicious extra request, matched legitimate extra request, plain reply
+defenses: [none]
+max_turns: 8
+workers: 1
+seed: 0
+max_consecutive_errors: 5
+
+models:
+  - label: or-model-1
+    provider: openrouter
+    model: REPLACE_WITH_OPENROUTER_MODEL_ID     # e.g. "<vendor>/<model>:free"
+    max_tokens: 4096
+    min_interval_s: 4          # at most ~15 requests a minute for this model; raise it if you hit 429 errors
+    # extra_body:              # optional OpenRouter request fields, e.g. provider routing preferences
+    #   provider: {sort: price}
+    price_per_mtok: {input: 0, output: 0}       # free; OpenRouter also reports the cost of every call
+
+  - label: or-model-2
+    provider: openrouter
+    model: REPLACE_WITH_OPENROUTER_MODEL_ID
+    max_tokens: 4096
+    min_interval_s: 4
+    price_per_mtok: {input: 0, output: 0}

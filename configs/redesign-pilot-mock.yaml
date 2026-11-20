@@ -1,0 +1,17 @@
+# The redesign pilot grid with scripted mock models: no API key, no network.
+# Shows what the four-outcome table looks like for a model that cannot tell
+# the two extra requests apart (claims) and for one that can (selective).
+name: redesign-pilot-mock
+scenarios: all
+conditions: [A, B, C, D, E]
+repetitions: 1
+kinds: [attack, benign_extra]
+defenses: [none]
+max_turns: 8
+models:
+  - label: mock-claims
+    provider: mock
+    behaviour: claims
+  - label: mock-selective
+    provider: mock
+    behaviour: selective

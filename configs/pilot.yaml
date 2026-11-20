@@ -1,0 +1,48 @@
+# Pilot (due 20 Nov 2026): 5 scenarios x conditions A-E x 2 models x 2 repetitions
+# = 100 attacked runs, plus 100 runs with a matched legitimate extra request and
+# 100 plain benign controls (honest helper reply only), all in the same grid.
+#
+# Keys come from environment variables, never from this file:
+#   export ANTHROPIC_API_KEY=...   export OPENAI_API_KEY=...
+#
+# Keep every setting below fixed for the whole experiment and record any change.
+name: pilot
+scenarios: all
+conditions: [A, B, C, D, E]
+repetitions: 2
+kinds: [attack, benign_extra, benign]   # malicious extra request, matched legitimate extra request, plain reply
+defenses: [none]          # add D1 and/or D2 for the defense arms later
+max_turns: 8
+workers: 1                # raise to 4-8 to go faster once a small test run looks right
+seed: 0                   # run order is shuffled with this seed
+max_consecutive_errors: 5 # stop early (e.g. bad key) instead of burning through the grid
+
+models:
+  - label: claude
+    provider: anthropic
+    model: claude-opus-5-5        # exact model id; change to the model you agree with your supervisor
+    max_tokens: 16000
+    effort: medium                # recorded; keep fixed for the whole experiment
+    price_per_mtok: {input: 4.00, output: 20.00}   # check the current price list
+
+  - label: openai
+    provider: openai
+    model: REPLACE_WITH_OPENAI_MODEL_ID   # exact versioned id, e.g. from the OpenAI models page
+    max_tokens: 16000
+    # temperature: 1.0           # optional; leave unset to use the provider default
+    price_per_mtok: {input: null, output: null}    # fill in from the current price list
+
+# A third model through any OpenAI-compatible endpoint (Gemini, or an open-weights
+# model on vLLM/Ollama) looks like this:
+#
+#  - label: gemini
+#    provider: openai
+#    model: REPLACE_WITH_GEMINI_MODEL_ID
+#    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+#    api_key_env: GEMINI_API_KEY
+#
+#  - label: open-weights
+#    provider: openai
+#    model: REPLACE_WITH_SERVED_MODEL_NAME
+#    base_url: http://localhost:8000/v1
+#    api_key_env: LOCAL_API_KEY      # any non-empty value for a local server
